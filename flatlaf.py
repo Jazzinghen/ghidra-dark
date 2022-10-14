@@ -1,89 +1,142 @@
 """FlatLaf package handling."""
 import os
+from typing import Tuple
 from pathlib import Path
 import fileinput
 import logging
+import hashlib
+import shutil
 from urllib.request import urlopen
 
 logger = logging.getLogger(__name__)
 
 
 class FlatLaf:
-    def __init__(self, version="2.5"):
+    theme: str = "com.formdev.flatlaf.intellijthemes.FlatDraculaIJTheme"
+
+    def __init__(self, ghidra_path: Path, version="2.5"):
         self.version = version
+        self.ghidra_path = ghidra_path
+        self.launch_properties_path = self.ghidra_path / "support" / "launch.properties"
 
-    def get_path(self, install_path: Path) -> Path:
-        return install_path / "Ghidra" / "patch" / f"flatlaf-{self.version}.jar"
-
-    def get_url(self):
+    def get_paths(self) -> Tuple[Path, Path]:
         return (
-            f"https://repo1.maven.org/maven2/com/formdev/flatlaf/{self.version}/"
-            f"flatlaf-{self.version}.jar"
+            self.ghidra_path / "Ghidra" / "patch" / f"flatlaf-{self.version}.jar",
+            self.ghidra_path
+            / "Ghidra"
+            / "patch"
+            / f"flatlaf-intellij-themes-{self.version}.jar",
         )
 
-    def install(self, install_path: Path, version: str):
-        """Download (if necessary) and install FlatLaf.
+    def get_urls(self) -> Tuple[str, str]:
+        return (
+            f"https://repo1.maven.org/maven2/com/formdev/flatlaf/{self.version}/"
+            f"flatlaf-{self.version}.jar",
+            f"https://repo1.maven.org/maven2/com/formdev/flatlaf-intellij-themes/"
+            f"{self.version}/flatlaf-intellij-themes-{self.version}.jar",
+        )
 
-        Args:
-            install_path (str): Ghidra install path.
-            version (str): Current Ghidra Version.
-        """
-        # TODO: Refactor this duplicate code
-        # version_string: str = ".".join(re.findall("[0-9]+", version))
-        # version_number = tuple(map(int, (version_string.split("."))))
+    def verify_jars(self) -> bool:
+        (flatlaf_path, themes_path) = self.get_paths()
+        (flatlaf_hash_url, themes_hash_url) = self.get_urls()
+        flatlaf_hash_url += ".sha512"
+        themes_hash_url += ".sha512"
 
-        flatlaf_path = self.get_path(install_path)
-        flatlaf_url = self.get_url()
+        logging.debug("Checking retrieved files")
+        with urlopen(flatlaf_hash_url) as response:
+            logging.debug("Checking FlatLAF hash")
+            flatlaf_hash_data: str = response.read().decode("utf-8")
+            with open(flatlaf_path, "rb") as flatlaf_jar:
+                flatlaf_hash = hashlib.sha512()
+                while jar_chunk := flatlaf_jar.read(8192):
+                    flatlaf_hash.update(jar_chunk)
+                hex_hash = flatlaf_hash.hexdigest()
+                if hex_hash != flatlaf_hash_data:
+                    logging.warning("FlatLAF jar has the wrong hash!")
+                    return False
+
+        with urlopen(themes_hash_url) as response:
+            logging.debug("Checking themes hash")
+            themes_hash_data: str = response.read().decode("utf-8")
+            with open(themes_path, "rb") as themes_jar:
+                themes_hash = hashlib.sha512()
+                while jar_chunk := themes_jar.read(8192):
+                    themes_hash.update(jar_chunk)
+                hex_hash = themes_hash.hexdigest()
+                if hex_hash != themes_hash_data:
+                    logging.warning("FlatLAF themes jar has the wrong hash!")
+                    return False
+
+        return True
+
+    def install(self):
+        """Download (if necessary) and install FlatLaf."""
+
+        (flatlaf_path, themes_path) = self.get_paths()
+        (flatlaf_url, themes_url) = self.get_urls()
 
         # Download the FlatLaf jar
         if not os.path.exists(flatlaf_path):
             logging.debug("Downloading FlatLaf")
             with urlopen(flatlaf_url) as connection:
                 with open(flatlaf_path, "wb") as fp:
-                    fp.write(connection.read())
+                    shutil.copyfileobj(connection, fp)
         else:
             logging.debug("Flatlaf already downloaded: %s", flatlaf_path)
 
-        launch_properties_path = install_path / "support" / "launch.properties"
+        # Download the FlatLaf tar jar
+        if not os.path.exists(themes_path):
+            logging.debug("Downloading FlatLaf themes")
+            with urlopen(themes_url) as connection:
+                with open(themes_path, "wb") as fp:
+                    shutil.copyfileobj(connection, fp)
+        else:
+            logging.debug("Flatlaf themes already downloaded: %s", themes_path)
+
+        assert self.verify_jars()
 
         # Check if FlatLaf is the system L&f
-        flatlaf_set = False
-        with open(launch_properties_path, "r") as fp:
-            for line in fp:
-                if "flatlaf" in line:
+        flatlaf_set: bool = False
+        with fileinput.FileInput(
+            self.launch_properties_path, inplace=True, backup=".bak", mode="r"
+        ) as input:
+            for line in input:
+                if "flatlaf" not in line:
+                    print(line, end="")
+                else:
+                    split_line = line.split("=")
+                    if len(split_line) == 3:
+                        split_line[2] = self.theme
+
+                    print("=".join(split_line), end="")
                     flatlaf_set = True
-                    break
 
         # Set FlatLaf as the system L&f
         if not flatlaf_set:
-            with open(launch_properties_path, "a") as fp:
+            with open(self.launch_properties_path, "a") as fp:
                 logging.debug("Setting FlatLaf as system L&f")
-                fp.write(
-                    "\nVMARGS=-Dswing.systemlaf=com.formdev.flatlaf.FlatDarculaLaf"
-                )
+                fp.write(f"\nVMARGS=-Dswing.systemlaf={self.theme}")
 
-    def remove(self, install_path: Path):
-        """Remove the flatlaf jar and remove it from launch files.
+    def remove(self):
+        """Remove the flatlaf jar and remove it from launch files."""
 
-        Args:
-            install_path (str): Ghidra install path.
-        """
+        (flatlaf_path, themes_path) = self.get_paths()
+        os.remove(flatlaf_path)
+        logger.debug("Removed %s", flatlaf_path)
+        os.remove(themes_path)
+        logger.debug("Removed %s", themes_path)
 
-        flatlaf_path = self.get_path(install_path)
-        try:
-            os.remove(flatlaf_path)
-            logger.debug("Removed %s", flatlaf_path)
-        except FileNotFoundError:
-            logger.warning("Could not remove %s", flatlaf_path)
-
-        launch_properties_path = install_path / "support" / "launch.properties"
-
-        with fileinput.FileInput(launch_properties_path, inplace=True) as fp:
+        with fileinput.FileInput(
+            self.launch_properties_path, inplace=True, backup=".bak"
+        ) as fp:
             for line in fp:
-                if (
-                    "VMARGS=-Dswing.systemlaf=com.formdev.flatlaf.FlatDarculaLaf"
-                    not in line
-                ):
+                write_line = True
+                if "flatlaf" in line:
+                    split_line = line.split("=")
+                    if len(split_line) == 3:
+                        write_line = False
+
+                if write_line:
                     print(line, end="")
-                else:
-                    logging.debug("Restored %s", launch_properties_path)
+
+            logging.debug("Restored %s", self.launch_properties_path)

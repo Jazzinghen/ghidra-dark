@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+from urllib.error import URLError
 
 from tcd_browser import TCDBrowser, TCD_LIST
 from preferences import preferences
@@ -37,17 +38,20 @@ def get_ghidra_install_path(install_path: Path | None = None) -> Path:
     """Find the Ghidra install path by using `which`.
 
     Args:
-        install_path (str, optional): Ghidra install path. Defaults to None.
+        install_path (Path, optional): Ghidra install path. Defaults to None.
 
     Returns:
-        str: Ghidra install path.
+        Path: Ghidra install path.
     """
     if install_path:
+        if not install_path.exists():
+            raise FileNotFoundError
         return install_path
+
     # Attempt to find the installation directory based on `ghidraRun`
     ghidra_run_path = shutil.which("ghidraRun")
     if not ghidra_run_path:
-        raise FileNotFoundError
+        raise FileNotFoundError()
     return Path(ghidra_run_path).resolve().parents[0]
 
 
@@ -59,7 +63,7 @@ def get_ghidra_config_path(version: str, user: str | None = None) -> Path:
         user (str, optional): The user's home to search. Defaults to None.
 
     Returns:
-        str: Ghidra config path.
+        Path: Ghidra config path.
     """
     home: Path = Path.home() if not user else Path(os.path.expanduser(f"~{user}"))
     logger.debug("Using home: %s", home)
@@ -82,7 +86,7 @@ def get_ghidra_version(install_path: Path) -> str:
     """Parse the version from the `application.properties` file.
 
     Args:
-        install_path (str): Ghidra installation path; contains `application.properties`
+        install_path (Path): Ghidra installation path; contains `application.properties`
 
     Returns:
         str: Ghidra Version (e.g. 9.2, 10.0-BETA).
@@ -100,7 +104,7 @@ def install_dark_preferences(config_path: Path):
     """Backup and modify preference files to use dark colors.
 
     Args:
-        config_path (str): Ghidra config path.
+        config_path (Path): Ghidra config path.
     """
     preferences_path = config_path / "preferences"
     if not os.path.exists(preferences_path):
@@ -128,13 +132,13 @@ def install_dark_preferences(config_path: Path):
             shutil.copy(tcd_path, backup_path)
             browser = TCDBrowser(tcd_path)
             browser.update(preferences)
-        except FileNotFoundError:
+        except FileNotFoundError as err:
             if tcd == "_code_browser.tcd":
                 logging.warning(
                     "Please open Ghidra at least once to fully install dark mode."
                 )
             else:
-                logging.debug("Could not open %s", tcd)
+                raise err
 
 
 def main(args: argparse.Namespace):
@@ -149,29 +153,41 @@ def main(args: argparse.Namespace):
         level = logging.WARNING
     logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
 
-    if is_ghidra_running():
-        logger.error("Please close any running Ghidra instances.")
-        sys.exit(-1)
+    try:
+        if is_ghidra_running():
+            logger.error("Please close any running Ghidra instances.")
+            sys.exit(-1)
+    except subprocess.SubprocessError as err:
+        logger.error(f"Encountered error while checking Ghidra: {err.with_traceback}")
+    except OSError as err:
+        logger.error(f"Encountered error: {err.strerror}")
 
     try:
         ghidra_install_path = get_ghidra_install_path(args.install_path)
-    except FileNotFoundError:
+        logging.debug("Using Ghidra install path %s", ghidra_install_path)
+    except FileNotFoundError as err:
         logging.error("Could not find Ghidra installation, specify with --path")
-        sys.exit(-1)
-    logging.debug("Using Ghidra install path %s", ghidra_install_path)
+        sys.exit(err.errno)
 
     ghidra_version = get_ghidra_version(ghidra_install_path)
     logging.debug("Found Ghidra v%s", ghidra_version)
 
-    ghidra_config_path = get_ghidra_config_path(ghidra_version, args.user)
-    logging.debug("Using Ghidra config path %s", ghidra_config_path)
+    try:
+        ghidra_config_path = get_ghidra_config_path(ghidra_version, args.user)
+        logging.debug("Using Ghidra config path %s", ghidra_config_path)
 
-    logging.debug("Installing FlatLaf...")
-    flatlaf = FlatLaf()
-    flatlaf.install(ghidra_install_path, ghidra_version)
+        logging.debug("Installing FlatLaf...")
+        flatlaf = FlatLaf(ghidra_install_path)
+        flatlaf.install()
 
-    logging.debug("Installing dark preferences...")
-    install_dark_preferences(ghidra_config_path)
+        logging.debug("Installing dark preferences...")
+        install_dark_preferences(ghidra_config_path)
+    except URLError as err:
+        logger.warning(f"Encountered an error while retrieving files: {err.strerror}")
+    except OSError as err:
+        logger.warning(f"Encountered an OS error: {err.strerror}")
+    except AssertionError as err:
+        logger.error(f"Failed an assertion: {err.with_traceback}")
 
 
 if __name__ == "__main__":
