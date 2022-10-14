@@ -1,6 +1,5 @@
 """Install Ghidra dark theme."""
 import argparse
-import fileinput
 import logging
 import os
 from pathlib import Path
@@ -34,7 +33,7 @@ def is_ghidra_running() -> bool:
     return False
 
 
-def get_ghidra_install_path(install_path: str = None) -> str:
+def get_ghidra_install_path(install_path: Path | None = None) -> Path:
     """Find the Ghidra install path by using `which`.
 
     Args:
@@ -48,11 +47,11 @@ def get_ghidra_install_path(install_path: str = None) -> str:
     # Attempt to find the installation directory based on `ghidraRun`
     ghidra_run_path = shutil.which("ghidraRun")
     if not ghidra_run_path:
-        return None
+        raise FileNotFoundError
     return Path(ghidra_run_path).resolve().parents[0]
 
 
-def get_ghidra_config_path(version: str, user: str = None) -> str:
+def get_ghidra_config_path(version: str, user: str | None = None) -> Path:
     """Find the Ghidra config path based off of `version` and `user`.
 
     Args:
@@ -62,10 +61,7 @@ def get_ghidra_config_path(version: str, user: str = None) -> str:
     Returns:
         str: Ghidra config path.
     """
-    if user:
-        home = os.path.expanduser(f"~{user}")
-    else:
-        home = Path.home()
+    home: Path = Path.home() if not user else Path(os.path.expanduser(f"~{user}"))
     logger.debug("Using home: %s", home)
 
     # _PUBLIC was appended to the name after 9.0.4
@@ -79,10 +75,10 @@ def get_ghidra_config_path(version: str, user: str = None) -> str:
     else:
         version_path = f".ghidra-{version}"
 
-    return os.path.join(home, ".ghidra", version_path)
+    return home / ".ghidra" / version_path
 
 
-def get_ghidra_version(install_path: str) -> str:
+def get_ghidra_version(install_path: Path) -> str:
     """Parse the version from the `application.properties` file.
 
     Args:
@@ -92,7 +88,7 @@ def get_ghidra_version(install_path: str) -> str:
         str: Ghidra Version (e.g. 9.2, 10.0-BETA).
     """
     # Get the version from the application.properties file
-    properties_path = os.path.join(install_path, "Ghidra", "application.properties")
+    properties_path = install_path / "Ghidra" / "application.properties"
     with open(properties_path, "r") as fp:
         for line in fp:
             if "application.version=" in line:
@@ -100,13 +96,13 @@ def get_ghidra_version(install_path: str) -> str:
     return ""
 
 
-def install_dark_preferences(config_path: str):
+def install_dark_preferences(config_path: Path):
     """Backup and modify preference files to use dark colors.
 
     Args:
         config_path (str): Ghidra config path.
     """
-    preferences_path = os.path.join(config_path, "preferences")
+    preferences_path = config_path / "preferences"
     if not os.path.exists(preferences_path):
         logging.error("Please open Ghidra at least once to fully install dark mode.")
         sys.exit(-1)
@@ -126,8 +122,8 @@ def install_dark_preferences(config_path: str):
 
     # Backup and modify the current tcd and tool files
     for tcd in TCD_LIST:
-        tcd_path = os.path.join(config_path, "tools", tcd)
-        backup_path = os.path.join(config_path, "tools", f"{tcd}.bak")
+        tcd_path = config_path / "tools" / tcd
+        backup_path = config_path / "tools" / f"{tcd}.bak"
         try:
             shutil.copy(tcd_path, backup_path)
             browser = TCDBrowser(tcd_path)
@@ -157,8 +153,9 @@ def main(args: argparse.Namespace):
         logger.error("Please close any running Ghidra instances.")
         sys.exit(-1)
 
-    ghidra_install_path = get_ghidra_install_path(args.install_path)
-    if not ghidra_install_path:
+    try:
+        ghidra_install_path = get_ghidra_install_path(args.install_path)
+    except FileNotFoundError:
         logging.error("Could not find Ghidra installation, specify with --path")
         sys.exit(-1)
     logging.debug("Using Ghidra install path %s", ghidra_install_path)
@@ -186,7 +183,7 @@ if __name__ == "__main__":
         "-p",
         "--path",
         dest="install_path",
-        type=str,
+        type=Path,
         default=None,
         help="the installation path for Ghidra",
     )

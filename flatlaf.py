@@ -1,6 +1,6 @@
 """FlatLaf package handling."""
 import os
-import re
+from pathlib import Path
 import fileinput
 import logging
 from urllib.request import urlopen
@@ -9,11 +9,11 @@ logger = logging.getLogger(__name__)
 
 
 class FlatLaf:
-    def __init__(self, version="2.0.2"):
+    def __init__(self, version="2.5"):
         self.version = version
 
-    def get_path(self, install_path: str):
-        return os.path.join(install_path, "Ghidra/patch/", f"flatlaf-{self.version}.jar")
+    def get_path(self, install_path: Path) -> Path:
+        return install_path / "Ghidra" / "patch" / f"flatlaf-{self.version}.jar"
 
     def get_url(self):
         return (
@@ -21,7 +21,7 @@ class FlatLaf:
             f"flatlaf-{self.version}.jar"
         )
 
-    def install(self, install_path: str, version: str):
+    def install(self, install_path: Path, version: str):
         """Download (if necessary) and install FlatLaf.
 
         Args:
@@ -29,8 +29,8 @@ class FlatLaf:
             version (str): Current Ghidra Version.
         """
         # TODO: Refactor this duplicate code
-        version_number = ".".join(re.findall("[0-9]+", version))
-        version_number = tuple(map(int, (version_number.split("."))))
+        # version_string: str = ".".join(re.findall("[0-9]+", version))
+        # version_number = tuple(map(int, (version_string.split("."))))
 
         flatlaf_path = self.get_path(install_path)
         flatlaf_url = self.get_url()
@@ -44,9 +44,7 @@ class FlatLaf:
         else:
             logging.debug("Flatlaf already downloaded: %s", flatlaf_path)
 
-        launch_properties_path = os.path.join(
-            install_path, "support", "launch.properties"
-        )
+        launch_properties_path = install_path / "support" / "launch.properties"
 
         # Check if FlatLaf is the system L&f
         flatlaf_set = False
@@ -60,9 +58,11 @@ class FlatLaf:
         if not flatlaf_set:
             with open(launch_properties_path, "a") as fp:
                 logging.debug("Setting FlatLaf as system L&f")
-                fp.write("\nVMARGS=-Dswing.systemlaf=com.formdev.flatlaf.FlatDarkLaf")
+                fp.write(
+                    "\nVMARGS=-Dswing.systemlaf=com.formdev.flatlaf.FlatDarculaLaf"
+                )
 
-    def remove(self, install_path: str):
+    def remove(self, install_path: Path):
         """Remove the flatlaf jar and remove it from launch files.
 
         Args:
@@ -76,14 +76,12 @@ class FlatLaf:
         except FileNotFoundError:
             logger.warning("Could not remove %s", flatlaf_path)
 
-        launch_properties_path = os.path.join(
-            install_path, "support", "launch.properties"
-        )
+        launch_properties_path = install_path / "support" / "launch.properties"
 
         with fileinput.FileInput(launch_properties_path, inplace=True) as fp:
             for line in fp:
                 if (
-                    "VMARGS=-Dswing.systemlaf=com.formdev.flatlaf.FlatDarkLaf"
+                    "VMARGS=-Dswing.systemlaf=com.formdev.flatlaf.FlatDarculaLaf"
                     not in line
                 ):
                     print(line, end="")
