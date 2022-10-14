@@ -42,9 +42,9 @@ class FlatLaf:
         flatlaf_hash_url += ".sha512"
         themes_hash_url += ".sha512"
 
-        logging.debug("Checking retrieved files")
+        logger.debug("Checking retrieved files")
         with urlopen(flatlaf_hash_url) as response:
-            logging.debug("Checking FlatLAF hash")
+            logger.debug("Checking FlatLAF hash")
             flatlaf_hash_data: str = response.read().decode("utf-8")
             with open(flatlaf_path, "rb") as flatlaf_jar:
                 flatlaf_hash = hashlib.sha512()
@@ -52,11 +52,13 @@ class FlatLaf:
                     flatlaf_hash.update(jar_chunk)
                 hex_hash = flatlaf_hash.hexdigest()
                 if hex_hash != flatlaf_hash_data:
-                    logging.warning("FlatLAF jar has the wrong hash!")
+                    logger.warning("FlatLAF jar has the wrong hash!")
                     return False
+                else:
+                    logger.debug(f"\tHash valid: {hex_hash}")
 
         with urlopen(themes_hash_url) as response:
-            logging.debug("Checking themes hash")
+            logger.debug("Checking themes hash")
             themes_hash_data: str = response.read().decode("utf-8")
             with open(themes_path, "rb") as themes_jar:
                 themes_hash = hashlib.sha512()
@@ -64,8 +66,10 @@ class FlatLaf:
                     themes_hash.update(jar_chunk)
                 hex_hash = themes_hash.hexdigest()
                 if hex_hash != themes_hash_data:
-                    logging.warning("FlatLAF themes jar has the wrong hash!")
+                    logger.warning("FlatLAF themes jar has the wrong hash!")
                     return False
+                else:
+                    logger.debug(f"\tHash valid: {hex_hash}")
 
         return True
 
@@ -77,21 +81,21 @@ class FlatLaf:
 
         # Download the FlatLaf jar
         if not os.path.exists(flatlaf_path):
-            logging.debug("Downloading FlatLaf")
+            logger.debug("Downloading FlatLaf")
             with urlopen(flatlaf_url) as connection:
                 with open(flatlaf_path, "wb") as fp:
                     shutil.copyfileobj(connection, fp)
         else:
-            logging.debug("Flatlaf already downloaded: %s", flatlaf_path)
+            logger.debug("Flatlaf already downloaded: %s", flatlaf_path)
 
         # Download the FlatLaf tar jar
         if not os.path.exists(themes_path):
-            logging.debug("Downloading FlatLaf themes")
+            logger.debug("Downloading FlatLaf themes")
             with urlopen(themes_url) as connection:
                 with open(themes_path, "wb") as fp:
                     shutil.copyfileobj(connection, fp)
         else:
-            logging.debug("Flatlaf themes already downloaded: %s", themes_path)
+            logger.debug("Flatlaf themes already downloaded: %s", themes_path)
 
         assert self.verify_jars()
 
@@ -114,17 +118,23 @@ class FlatLaf:
         # Set FlatLaf as the system L&f
         if not flatlaf_set:
             with open(self.launch_properties_path, "a") as fp:
-                logging.debug("Setting FlatLaf as system L&f")
+                logger.debug("Setting FlatLaf as system L&f")
                 fp.write(f"\nVMARGS=-Dswing.systemlaf={self.theme}")
 
     def remove(self):
         """Remove the flatlaf jar and remove it from launch files."""
 
         (flatlaf_path, themes_path) = self.get_paths()
-        os.remove(flatlaf_path)
-        logger.debug("Removed %s", flatlaf_path)
-        os.remove(themes_path)
-        logger.debug("Removed %s", themes_path)
+        try:
+            os.remove(flatlaf_path)
+            logger.debug("Removed %s", flatlaf_path)
+        except FileNotFoundError:
+            logger.warning("FlatLAF jar not found")
+        try:
+            os.remove(themes_path)
+            logger.debug("Removed %s", themes_path)
+        except FileNotFoundError:
+            logger.warning("FlatLAF Themes jar not found")
 
         with fileinput.FileInput(
             self.launch_properties_path, inplace=True, backup=".bak"
@@ -139,4 +149,4 @@ class FlatLaf:
                 if write_line:
                     print(line, end="")
 
-            logging.debug("Restored %s", self.launch_properties_path)
+            logger.debug("Restored %s", self.launch_properties_path)

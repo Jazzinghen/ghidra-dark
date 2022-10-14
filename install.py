@@ -25,7 +25,9 @@ def main(args: argparse.Namespace) -> int:
         level = logging.DEBUG
     else:
         level = logging.WARNING
-    logging.basicConfig(level=level, format="%(levelname)s: %(message)s")
+    logging.basicConfig(
+        level=level, format="%(asctime)s - %(levelname)s: %(message)s", datefmt="%X"
+    )
 
     try:
         if ghidra_utils.is_running():
@@ -55,19 +57,19 @@ def main(args: argparse.Namespace) -> int:
         logger.debug("Using Ghidra config path %s", ghidra_config_path)
 
         if not args.remove:
-            logging.debug("Installing FlatLaf...")
+            logger.debug("Installing FlatLaf...")
             flatlaf = FlatLaf(ghidra_install_path)
             flatlaf.install()
 
             logger.debug("Installing dark preferences...")
             config_handler.install_dark_preferences(ghidra_config_path)
         else:
-            logging.debug("Uninstalling FlatLaf...")
+            logger.debug("Uninstalling FlatLaf...")
             flatlaf = FlatLaf(ghidra_install_path)
             flatlaf.remove()
 
-            logger.debug("Installing dark preferences...")
-            config_handler.install_dark_preferences(ghidra_config_path)
+            logger.debug("Removing dark preferences...")
+            config_handler.remove_dark_preferences(ghidra_config_path)
     except URLError as err:
         logger.warning(f"Encountered an error while retrieving files: {err.strerror}")
         return err.errno
